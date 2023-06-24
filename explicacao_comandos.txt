@@ -1,0 +1,9 @@
+Git comands (gerenciando localmente):
+•	Git init => inicializa um repositório git localmente;
+•	Git add . => adiciona mudancas a um commit;
+•	Git commit -m “your mansage” => cria um commit com uma desc.;
+•	Git branch -M main => renomea a Branch atual pra main;
+Git comands (enviando ao repositorio online):
+•	Git remote add origin main linkSSH => conecta repositorio local com repositorio online;
+•	Git push -u origin main => carrega commit atual no repositorio online na branch main;
+•	Git pull => carrega o ultimo commit do repositorio online no repositorio local.
