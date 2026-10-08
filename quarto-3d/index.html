@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Quarto 3D</title>
+<style>
+  :root {
+    --bg: #1b1d22;
+    --panel: rgba(24, 26, 31, 0.86);
+    --text: #e9e6e1;
+    --muted: #a7a39c;
+    --accent: #d8b98a;
+    --border: rgba(255, 255, 255, 0.12);
+  }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #app { position: fixed; inset: 0; }
+  .ui { position: fixed; top: 12px; left: 12px; right: 12px; display: flex; flex-wrap: wrap; gap: 8px;
+    align-items: flex-start; pointer-events: none; }
+  .group { pointer-events: auto; display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 10px; backdrop-filter: blur(6px); }
+  button { font: inherit; font-size: 13px; color: var(--text); background: transparent; border: 1px solid var(--border);
+    border-radius: 7px; padding: 7px 11px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.active { background: var(--accent); color: #1b1d22; border-color: var(--accent); }
+  .info { position: fixed; left: 12px; bottom: 12px; max-width: min(340px, calc(100% - 24px)); font-size: 12px;
+    line-height: 1.5; color: var(--muted); background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px; }
+  .info b { color: var(--text); }
+  .info.hidden { display: none; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div class="ui">
+  <div class="group" id="views">
+    <button data-view="top">Vista de cima</button>
+    <button data-view="front">Vista frontal</button>
+    <button data-view="free" class="active">Câmera livre</button>
+  </div>
+  <div class="group">
+    <button id="btnWalls" class="active">Corte automático</button>
+    <button id="btnLed">LED: roxo</button>
+    <button id="btnDoor">Fechar porta</button>
+    <button id="btnInfo">Legenda</button>
+  </div>
+</div>
+
+<div class="info" id="info">
+  <b>Quarto 2,26 × 2,95 m · pé-direito 2,76 m</b><br />
+  X = largura (janela em X=0, porta em X=2,26) · Z = comprimento (guarda-roupa em Z=0)<br />
+  Arraste para girar · roda/pinça para zoom · botão direito/dois dedos para mover.
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
+
+// ---------------------------------------------------------------------------
+// Dimensões (metros)
+// ---------------------------------------------------------------------------
+const W = 2.26;   // largura (X)
+const L = 2.95;   // comprimento (Z)
+const H = 2.76;   // pé-direito (Y)
+const T = 0.10;   // espessura das paredes (para fora do quarto)
+
+// ---------------------------------------------------------------------------
+// Renderer, cena, câmera
+// ---------------------------------------------------------------------------
+const container = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1b1d22);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.05, 100);
+const center = new THREE.Vector3(W / 2, 1.1, L / 2);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 0.5;
+controls.maxDistance = 24;
+controls.target.copy(center);
+
+RectAreaLightUniformsLib.init();
+
+// ---------------------------------------------------------------------------
+// Texturas procedurais
+// ---------------------------------------------------------------------------
+function floorTexture() {
+  // 1 repetição = 1,20 m × 1,20 m, tábuas de 0,15 m
+  const c = document.createElement('canvas');
+  c.width = c.height = 1024;
+  const g = c.getContext('2d');
+  const rows = 8, rh = c.height / rows;
+  for (let r = 0; r < rows; r++) {
+    let x = -Math.random() * 400;
+    while (x < c.width) {
+      const len = 380 + Math.random() * 420;
+      const l = 48 + Math.random() * 10;
+      g.fillStyle = `hsl(30, ${38 + Math.random() * 10}%, ${l}%)`;
+      g.fillRect(x, r * rh, len, rh);
+      // veios
+      for (let i = 0; i < 14; i++) {
+        g.strokeStyle = `rgba(80, 45, 15, ${0.05 + Math.random() * 0.08})`;
+        g.lineWidth = 1 + Math.random() * 2;
+        g.beginPath();
+        const y0 = r * rh + Math.random() * rh;
+        g.moveTo(x, y0);
+        g.bezierCurveTo(x + len * 0.3, y0 + (Math.random() - 0.5) * 12,
+          x + len * 0.7, y0 + (Math.random() - 0.5) * 12, x + len, y0 + (Math.random() - 0.5) * 8);
+        g.stroke();
+      }
+      g.fillStyle = 'rgba(40, 22, 8, 0.55)';
+      g.fillRect(x, r * rh, 3, rh);
+      x += len;
+    }
+    g.fillStyle = 'rgba(40, 22, 8, 0.6)';
+    g.fillRect(0, r * rh, c.width, 3);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(W / 1.2, L / 1.2);
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return t;
+}
+
+function grainTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 60; i++) {
+    g.strokeStyle = `rgba(120, 80, 40, ${0.04 + Math.random() * 0.06})`;
+    g.lineWidth = 1 + Math.random() * 2;
+    g.beginPath();
+    const y = Math.random() * 256;
+    g.moveTo(0, y);
+    g.bezierCurveTo(85, y + (Math.random() - 0.5) * 20, 170, y + (Math.random() - 0.5) * 20, 256, y);
+    g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+// ---------------------------------------------------------------------------
+// Materiais
+// ---------------------------------------------------------------------------
+const grain = grainTexture();
+const M = {
+  wood:      new THREE.MeshStandardMaterial({ color: 0xe3c79c, map: grain, roughness: 0.65 }),
+  woodDoor:  new THREE.MeshStandardMaterial({ color: 0xead2ab, map: grain, roughness: 0.6 }),
+  woodDark:  new THREE.MeshStandardMaterial({ color: 0xc9a675, map: grain, roughness: 0.7 }),
+  metal:     new THREE.MeshStandardMaterial({ color: 0x2b2d31, roughness: 0.35, metalness: 0.8 }),
+  steel:     new THREE.MeshStandardMaterial({ color: 0xb9bcc2, roughness: 0.3, metalness: 0.9 }),
+  black:     new THREE.MeshStandardMaterial({ color: 0x17181b, roughness: 0.55 }),
+  red:       new THREE.MeshStandardMaterial({ color: 0xb3202a, roughness: 0.5 }),
+  white:     new THREE.MeshStandardMaterial({ color: 0xf2f2f0, roughness: 0.4 }),
+  mattress:  new THREE.MeshStandardMaterial({ color: 0xf1efe9, roughness: 0.9 }),
+  blanket:   new THREE.MeshStandardMaterial({ color: 0x46607a, roughness: 0.95 }),
+  pillow:    new THREE.MeshStandardMaterial({ color: 0xdcd6cc, roughness: 0.95 }),
+  cushion:   new THREE.MeshStandardMaterial({ color: 0x8a9095, roughness: 0.95 }),
+  screen:    new THREE.MeshStandardMaterial({ color: 0x0a0d14, emissive: 0x3557a8, emissiveIntensity: 0.55, roughness: 0.2 }),
+  glass:     new THREE.MeshPhysicalMaterial({ color: 0xbfdcf0, transparent: true, opacity: 0.25, roughness: 0.05, depthWrite: false }),
+  floor:     new THREE.MeshStandardMaterial({ map: floorTexture(), roughness: 0.75 }),
+};
+const edgeMat = new THREE.LineBasicMaterial({ color: 0x3b2d1d, transparent: true, opacity: 0.35 });
+
+// ---------------------------------------------------------------------------
+// Utilitários de geometria
+// ---------------------------------------------------------------------------
+/** Caixa definida por limites absolutos (x0..x1, y0..y1, z0..z1). */
+function box(x0, x1, y0, y1, z0, z1, mat, { parent = scene, edges = true, shadow = true, edge = edgeMat } = {}) {
+  const geo = new THREE.BoxGeometry(Math.abs(x1 - x0), Math.abs(y1 - y0), Math.abs(z1 - z0));
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+  mesh.castShadow = shadow;
+  mesh.receiveShadow = true;
+  if (edges) mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), edge));
+  parent.add(mesh);
+  return mesh;
+}
+
+/** Cilindro ligando dois pontos. */
+function rod(a, b, r, mat, parent = scene) {
+  const d = new THREE.Vector3().subVectors(b, a);
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, d.length(), 16), mat);
+  m.position.copy(a).add(b).multiplyScalar(0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
+  m.castShadow = true;
+  parent.add(m);
+  return m;
+}
+
+function sphere(p, r, mat, parent = scene) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), mat);
+  m.position.copy(p);
+  m.castShadow = true;
+  parent.add(m);
+  return m;
+}
+
+const v = (x, y, z) => new THREE.Vector3(x, y, z);
+
+// ---------------------------------------------------------------------------
+// Piso, contorno do teto
+// ---------------------------------------------------------------------------
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, L), M.floor);
+floor.rotation.x = -Math.PI / 2;
+floor.position.set(W / 2, 0, L / 2);
+floor.receiveShadow = true;
+scene.add(floor);
+
+// laje "externa" sob as paredes
+box(-T, W + T, -0.06, -0.001, -T, L + T, new THREE.MeshStandardMaterial({ color: 0x2a2c31, roughness: 1 }), { edges: false, shadow: false });
+
+// contorno do teto (o teto é cortado)
+{
+  const pts = [v(0, H, 0), v(W, H, 0), v(W, H, L), v(0, H, L), v(0, H, 0)];
+  scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color: 0x8c8c8c, transparent: true, opacity: 0.6 })));
+}
+
+// ---------------------------------------------------------------------------
+// Paredes (semitransparentes, com corte automático das que ficam na frente)
+// ---------------------------------------------------------------------------
+const walls = [];
+function makeWall(name, normal, point) {
+  const group = new THREE.Group();
+  group.name = name;
+  scene.add(group);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x9a9da3, roughness: 0.9, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide });
+  const edge = new THREE.LineBasicMaterial({ color: 0x55585e, transparent: true, opacity: 0.8 });
+  const wall = { group, normal, point, mats: [mat, edge], current: 1 };
+  wall.part = (x0, x1, y0, y1, z0, z1) => box(x0, x1, y0, y1, z0, z1, mat, { parent: group, shadow: false, edge });
+  walls.push(wall);
+  return wall;
+}
+
+// Parede de cima (Z = 0)
+makeWall('Z0', v(0, 0, -1), v(0, 0, 0)).part(-T, W + T, 0, H, -T, 0);
+// Parede do fundo (Z = L)
+makeWall('ZL', v(0, 0, 1), v(0, 0, L)).part(-T, W + T, 0, H, L, L + T);
+
+// Parede esquerda (X = 0) com janela
+const winZ0 = 0.77, winZ1 = 2.32, sill = 1.10, winTop = 1.10 + 1.20;
+{
+  const w = makeWall('X0', v(-1, 0, 0), v(0, 0, 0));
+  w.part(-T, 0, 0, H, 0, winZ0);
+  w.part(-T, 0, 0, H, winZ1, L);
+  w.part(-T, 0, 0, sill, winZ0, winZ1);
+  w.part(-T, 0, winTop, H, winZ0, winZ1);
+
+  // caixilho e vidro
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0xf4f4f2, roughness: 0.4, transparent: true, opacity: 1 });
+  w.mats.push(frameMat);
+  const f = 0.04;
+  box(-T, 0, sill, sill + f, winZ0, winZ1, frameMat, { parent: w.group, shadow: false });
+  box(-T, 0, winTop - f, winTop, winZ0, winZ1, frameMat, { parent: w.group, shadow: false });
+  box(-T, 0, sill, winTop, winZ0, winZ0 + f, frameMat, { parent: w.group, shadow: false });
+  box(-T, 0, sill, winTop, winZ1 - f, winZ1, frameMat, { parent: w.group, shadow: false });
+  const mid = (winZ0 + winZ1) / 2;
+  box(-T * 0.7, -T * 0.3, sill, winTop, mid - f / 2, mid + f / 2, frameMat, { parent: w.group, shadow: false });
+  const glass = box(-0.055, -0.045, sill + f, winTop - f, winZ0 + f, winZ1 - f, M.glass, { parent: w.group, shadow: false, edges: false });
+  glass.receiveShadow = false;
+  // peitoril interno
+  box(0, 0.06, sill - 0.02, sill, winZ0 - 0.03, winZ1 + 0.03, frameMat, { parent: w.group, shadow: false });
+}
+
+// Parede direita (X = W) com porta
+const doorZ0 = 0.05, doorZ1 = 0.98, doorH = 2.10;
+{
+  const w = makeWall('XW', v(1, 0, 0), v(W, 0, 0));
+  w.part(W, W + T, 0, H, 0, doorZ0);
+  w.part(W, W + T, 0, H, doorZ1, L);
+  w.part(W, W + T, doorH, H, doorZ0, doorZ1);
+  // batentes (guarnição) visíveis por dentro
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0xf4f4f2, roughness: 0.5, transparent: true, opacity: 1 });
+  w.mats.push(trimMat);
+  box(W - 0.015, W + T, 0, doorH + 0.05, doorZ0 - 0.05, doorZ0, trimMat, { parent: w.group, shadow: false });
+  box(W - 0.015, W + T, 0, doorH + 0.05, doorZ1, doorZ1 + 0.05, trimMat, { parent: w.group, shadow: false });
+  box(W - 0.015, W + T, doorH, doorH + 0.05, doorZ0, doorZ1, trimMat, { parent: w.group, shadow: false });
+}
+
+// Folha da porta (dobradiça em Z = 0,05, abre para dentro em direção à parede Z = 0)
+const doorPivot = new THREE.Group();
+doorPivot.position.set(W - 0.005, 0, doorZ0 + 0.01);
+scene.add(doorPivot);
+{
+  const leafW = doorZ1 - doorZ0 - 0.02;
+  box(-0.035, 0, 0.01, doorH - 0.01, 0, leafW, M.woodDoor, { parent: doorPivot });
+  // maçanetas
+  rod(v(-0.035, 1.0, leafW - 0.07), v(-0.09, 1.0, leafW - 0.07), 0.008, M.steel, doorPivot);
+  rod(v(-0.09, 1.0, leafW - 0.07), v(-0.09, 1.0, leafW - 0.18), 0.009, M.steel, doorPivot);
+  // arco de abertura no piso
+  const arcPts = [];
+  for (let i = 0; i <= 32; i++) {
+    const a = (i / 32) * Math.PI / 2;
+    arcPts.push(v(W - Math.sin(a) * leafW, 0.003, doorZ0 + Math.cos(a) * leafW));
+  }
+  const arc = new THREE.Line(new THREE.BufferGeometry().setFromPoints(arcPts),
+    new THREE.LineDashedMaterial({ color: 0x6b4b2a, dashSize: 0.04, gapSize: 0.03 }));
+  arc.computeLineDistances();
+  scene.add(arc);
+}
+let doorOpen = true;
+let doorAngle = THREE.MathUtils.degToRad(70);
+const DOOR_OPEN = THREE.MathUtils.degToRad(70);
+
+// ---------------------------------------------------------------------------
+// 1. Guarda-roupa (Z = 0, X 0 → 1,25, prof. 0,58, até o teto)
+// ---------------------------------------------------------------------------
+{
+  const x0 = 0, x1 = 1.25, d = 0.58;
+  box(x0, x1, 0, H, 0, d - 0.02, M.wood);
+  box(x0 + 0.02, x1 - 0.02, 0, 0.08, d - 0.02, d - 0.01, M.woodDark, { edges: false }); // rodapé
+  const nDoors = 3, gap = 0.004, dw = (x1 - x0) / nDoors;
+  const split = 2.25; // maleiro
+  for (let i = 0; i < nDoors; i++) {
+    const a = x0 + i * dw + gap, b = x0 + (i + 1) * dw - gap;
+    box(a, b, 0.08 + gap, split - gap, d - 0.02, d, M.woodDoor);
+    box(a, b, split + gap, H - gap, d - 0.02, d, M.woodDoor);
+    // puxadores
+    const hx = i === nDoors - 1 ? a + 0.05 : b - 0.05;
+    box(hx - 0.008, hx + 0.008, 0.95, 1.35, d, d + 0.02, M.metal, { edges: false });
+    box(hx - 0.06, hx + 0.06, split + 0.05, split + 0.066, d, d + 0.02, M.metal, { edges: false });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 2. Banco-baú sob a janela (X 0 → 0,40, Z 0,77 → 2,32, h 0,45)
+// ---------------------------------------------------------------------------
+{
+  box(0, 0.40, 0, 0.42, 0.77, 2.32, M.wood);
+  box(0, 0.41, 0.42, 0.45, 0.77, 2.32, M.woodDoor);                 // tampa
+  box(0.38, 0.40, 0.35, 0.37, 1.45, 1.64, M.metal, { edges: false }); // puxador da tampa
+  box(0.01, 0.39, 0.45, 0.52, 0.79, 2.30, M.cushion);               // assento estofado
+  // almofadas de encosto
+  const pm = M.pillow;
+  for (const z of [1.05, 1.55, 2.05]) {
+    const p = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.38, 0.42), pm);
+    p.position.set(0.08, 0.72, z);
+    p.rotation.z = -0.15;
+    p.castShadow = true;
+    scene.add(p);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 3. Cama suspensa (X 1,31 → 2,26, Z 1,00 → 2,95, base em 1,55)
+// ---------------------------------------------------------------------------
+const bedX0 = 1.31, bedZ0 = 1.00, bedY = 1.55, bedT = 0.10, matT = 0.15, railH = 0.30;
+const bedTop = bedY + bedT;
+const ladderZ0 = 2.50;
+{
+  box(bedX0, W, bedY, bedTop, bedZ0, L, M.wood);
+  // colchão, travesseiro, edredom
+  box(bedX0 + 0.03, W - 0.01, bedTop, bedTop + matT, bedZ0 + 0.03, L - 0.01, M.mattress);
+  box(bedX0 + 0.12, W - 0.10, bedTop + matT, bedTop + matT + 0.10, bedZ0 + 0.08, bedZ0 + 0.42, M.pillow);
+  box(bedX0 + 0.02, W - 0.005, bedTop + matT, bedTop + matT + 0.04, bedZ0 + 0.55, L - 0.01, M.blanket);
+
+  // grade de 0,30 m nos lados abertos (deixando a passagem da escada)
+  const p = 0.04;
+  const railTop = bedTop + railH;
+  // lado X = 1,31 (de Z 1,00 até a escada)
+  box(bedX0, bedX0 + p, bedTop, railTop, bedZ0, bedZ0 + p, M.wood);
+  box(bedX0, bedX0 + p, bedTop, railTop, ladderZ0 - p, ladderZ0, M.wood);
+  box(bedX0, bedX0 + p, railTop - 0.05, railTop, bedZ0, ladderZ0, M.wood);
+  for (let z = bedZ0 + 0.15; z < ladderZ0 - 0.08; z += 0.12) {
+    box(bedX0 + 0.01, bedX0 + p - 0.01, bedTop, railTop - 0.05, z - 0.012, z + 0.012, M.woodDark, { edges: false });
+  }
+  // lado Z = 1,00 (até a parede X = 2,26)
+  box(W - p, W, bedTop, railTop, bedZ0, bedZ0 + p, M.wood);
+  box(bedX0, W, railTop - 0.05, railTop, bedZ0, bedZ0 + p, M.wood);
+  for (let x = bedX0 + 0.15; x < W - 0.08; x += 0.12) {
+    box(x - 0.012, x + 0.012, bedTop, railTop - 0.05, bedZ0 + 0.01, bedZ0 + p - 0.01, M.woodDark, { edges: false });
+  }
+
+  // pilar de apoio no canto livre + mãos-francesas na parede
+  box(bedX0, bedX0 + 0.06, 0, bedY, bedZ0, bedZ0 + 0.06, M.wood);
+  box(bedX0, W, bedY - 0.08, bedY, L - 0.04, L, M.woodDark);        // travessa na parede do fundo
+  box(W - 0.04, W, bedY - 0.08, bedY, bedZ0, L, M.woodDark);         // travessa na parede direita
+}
+
+// Fita de LED sob a plataforma
+const ledColors = [
+  { name: 'roxo', c: 0x9b5cff },
+  { name: 'ciano', c: 0x2fd6ff },
+  { name: 'quente', c: 0xffb46b },
+  { name: 'vermelho', c: 0xff3048 },
+  { name: 'desligado', c: null },
+];
+let ledIndex = 0;
+const ledMat = new THREE.MeshBasicMaterial({ color: ledColors[0].c });
+const ledLights = [];
+{
+  const y0 = bedY - 0.10, y1 = bedY - 0.088;
+  // contorno interno sob a cama (sobre a mesa)
+  box(1.63, W - 0.06, y0, y1, bedZ0 + 0.03, bedZ0 + 0.045, ledMat, { edges: false, shadow: false });
+  box(1.63, 1.645, y0, y1, bedZ0 + 0.03, L - 0.06, ledMat, { edges: false, shadow: false });
+  // borda externa voltada ao quarto
+  box(bedX0 + 0.06, bedX0 + 0.075, bedY - 0.012, bedY, bedZ0 + 0.06, L - 0.02, ledMat, { edges: false, shadow: false });
+
+  const rect = new THREE.RectAreaLight(ledColors[0].c, 6, 0.6, 1.9);
+  rect.position.set((1.61 + W) / 2, bedY - 0.11, (bedZ0 + L) / 2);
+  rect.lookAt(rect.position.x, 0, rect.position.z);
+  scene.add(rect);
+  ledLights.push({ light: rect, on: 6 });
+  for (const z of [1.35, 2.0, 2.65]) {
+    const pl = new THREE.PointLight(ledColors[0].c, 0.35, 2.2, 2);
+    pl.position.set(bedX0 + 0.1, bedY - 0.05, z);
+    scene.add(pl);
+    ledLights.push({ light: pl, on: 0.35 });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 4. Mesa embaixo da cama (X 1,61 → 2,26, Z 1,00 → 2,95, tampo a 0,75)
+// ---------------------------------------------------------------------------
+const deskX0 = 1.61, deskY = 0.75;
+const nicheZ0 = 2.53; // nicho do PS5 no canto Z = 2,95
+{
+  box(deskX0, W, deskY - 0.03, deskY, bedZ0, L, M.wood);              // tampo
+  box(deskX0 + 0.03, W, 0, deskY - 0.03, bedZ0, bedZ0 + 0.03, M.wood); // lateral
+  box(deskX0 + 0.03, W, 0, deskY - 0.03, nicheZ0 - 0.03, nicheZ0, M.wood); // divisória do nicho
+  box(deskX0 + 0.03, W, 0, 0.05, nicheZ0, L, M.wood);                 // base do nicho
+  box(deskX0 + 0.03, W, 0.50, 0.52, nicheZ0, L, M.wood);              // prateleira do nicho
+  box(deskX0 + 0.08, W, 0.05, deskY - 0.03, L - 0.01, L, M.woodDark, { edges: false });
+
+  // PS5 em pé no nicho
+  const ps = new THREE.Group();
+  ps.position.set(1.98, 0.05, 2.74);
+  scene.add(ps);
+  box(-0.13, 0.13, 0, 0.39, -0.035, 0.035, M.black, { parent: ps, edges: false });
+  box(-0.135, 0.135, 0.01, 0.40, 0.035, 0.052, M.white, { parent: ps, edges: false });
+  box(-0.135, 0.135, 0.01, 0.40, -0.052, -0.035, M.white, { parent: ps, edges: false });
+  box(-0.06, 0.06, -0.01, 0.0, -0.06, 0.06, M.black, { parent: ps, edges: false });
+  // controle na prateleira
+  const pad = new THREE.Group();
+  pad.position.set(1.95, 0.52, 2.75);
+  scene.add(pad);
+  box(-0.05, 0.05, 0, 0.035, -0.07, 0.07, M.white, { parent: pad, edges: false });
+  box(-0.03, 0.03, 0.035, 0.04, -0.03, 0.03, M.black, { parent: pad, edges: false });
+
+  // teclado, mouse, mouse pad
+  box(1.70, 2.00, deskY, deskY + 0.002, 1.62, 2.34, M.black, { edges: false });
+  box(1.72, 1.86, deskY, deskY + 0.025, 1.72, 2.16, M.metal, { edges: false });
+  const mouse = new THREE.Mesh(new THREE.SphereGeometry(0.035, 16, 10), M.metal);
+  mouse.scale.set(1.6, 0.5, 1);
+  mouse.position.set(1.80, deskY + 0.012, 2.26);
+  scene.add(mouse);
+
+  // Monitor ~0,70 m em braço articulado preso à parede X = 2,26
+  const mY = 1.13, mZ = 1.97;
+  box(W - 0.012, W, mY - 0.09, mY + 0.09, mZ + 0.12, mZ + 0.20, M.metal, { edges: false }); // base de parede
+  const j0 = v(W - 0.03, mY, mZ + 0.16), j1 = v(2.10, mY, mZ + 0.26), j2 = v(2.035, mY, mZ);
+  rod(v(W - 0.012, mY, mZ + 0.16), j0, 0.016, M.metal);
+  rod(j0, j1, 0.016, M.metal);
+  rod(j1, j2, 0.016, M.metal);
+  sphere(j0, 0.024, M.metal); sphere(j1, 0.024, M.metal); sphere(j2, 0.024, M.metal);
+  rod(j2, v(2.0, mY, mZ), 0.02, M.metal);
+  const mw = 0.70, mh = 0.40;
+  box(1.965, 2.0, mY - mh / 2, mY + mh / 2, mZ - mw / 2, mZ + mw / 2, M.black, { edges: false });
+  box(1.962, 1.966, mY - mh / 2 + 0.012, mY + mh / 2 - 0.012, mZ - mw / 2 + 0.012, mZ + mw / 2 - 0.012, M.screen, { edges: false, shadow: false });
+}
+
+// ---------------------------------------------------------------------------
+// 5. Escada-baú (Z 2,50 → 2,95, X 0,40 → 1,31, 5 degraus subindo para a cama)
+// ---------------------------------------------------------------------------
+{
+  const x0 = 0.40, x1 = bedX0, n = 5;
+  const stepW = (x1 - x0) / n;
+  const rise = bedTop / (n + 1);
+  for (let i = 0; i < n; i++) {
+    const a = x0 + i * stepW, b = a + stepW;
+    const top = rise * (i + 1);
+    box(a, b, 0, top - 0.025, ladderZ0, L, M.wood);
+    box(a - 0.005, b, top - 0.025, top, ladderZ0 - 0.02, L, M.woodDark);   // pisante
+    // frente de gaveta/baú em cada degrau (face Z = 2,50)
+    const dy0 = Math.max(0.06, top - 0.025 - 0.30);
+    box(a + 0.012, b - 0.012, dy0, top - 0.045, ladderZ0 - 0.012, ladderZ0, M.woodDoor);
+    box((a + b) / 2 - 0.04, (a + b) / 2 + 0.04, top - 0.09, top - 0.075, ladderZ0 - 0.03, ladderZ0 - 0.012, M.metal, { edges: false });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 6. Cadeira gamer em frente à mesa (voltada para +X)
+// ---------------------------------------------------------------------------
+{
+  const chair = new THREE.Group();
+  chair.position.set(1.22, 0, 1.97);
+  chair.rotation.y = -0.08;
+  scene.add(chair);
+
+  // base estrela com rodízios
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    const end = v(Math.cos(a) * 0.32, 0.07, Math.sin(a) * 0.32);
+    rod(v(0, 0.09, 0), end, 0.018, M.black, chair);
+    sphere(v(end.x, 0.03, end.z), 0.03, M.black, chair);
+  }
+  rod(v(0, 0.09, 0), v(0, 0.44, 0), 0.028, M.steel, chair);
+
+  // assento
+  box(-0.25, 0.25, 0.44, 0.53, -0.26, 0.26, M.black, { parent: chair, edges: false });
+  box(-0.25, 0.25, 0.47, 0.57, -0.29, -0.22, M.red, { parent: chair, edges: false });
+  box(-0.25, 0.25, 0.47, 0.57, 0.22, 0.29, M.red, { parent: chair, edges: false });
+
+  // encosto reclinado
+  const back = new THREE.Group();
+  back.position.set(-0.24, 0.52, 0);
+  back.rotation.z = 0.14;
+  chair.add(back);
+  box(-0.06, 0.04, 0, 0.82, -0.25, 0.25, M.black, { parent: back, edges: false });
+  box(-0.06, 0.06, 0.05, 0.70, -0.29, -0.20, M.red, { parent: back, edges: false });
+  box(-0.06, 0.06, 0.05, 0.70, 0.20, 0.29, M.red, { parent: back, edges: false });
+  box(0.04, 0.05, 0.10, 0.62, -0.03, 0.03, M.red, { parent: back, edges: false });
+  box(0.04, 0.10, 0.66, 0.78, -0.12, 0.12, M.black, { parent: back, edges: false });   // apoio de cabeça
+  box(0.04, 0.10, 0.12, 0.24, -0.14, 0.14, M.black, { parent: back, edges: false });   // apoio lombar
+
+  // braços
+  for (const s of [-1, 1]) {
+    box(-0.12, -0.08, 0.53, 0.72, s * 0.29 - 0.02, s * 0.29 + 0.02, M.black, { parent: chair, edges: false });
+    box(-0.18, 0.10, 0.72, 0.75, s * 0.29 - 0.045, s * 0.29 + 0.045, M.black, { parent: chair, edges: false });
+  }
+  chair.traverse(o => { if (o.isMesh) o.castShadow = true; });
+}
+
+// ---------------------------------------------------------------------------
+// Iluminação
+// ---------------------------------------------------------------------------
+scene.add(new THREE.HemisphereLight(0xfaf6ef, 0x5a4a3a, 0.9));
+scene.add(new THREE.AmbientLight(0xffffff, 0.15));
+
+// sol entrando pela janela (lado X = 0)
+const sun = new THREE.DirectionalLight(0xfff1dc, 2.2);
+sun.position.set(-3.5, 4.2, 1.2);
+sun.target.position.set(1.2, 0, 1.6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -3; sun.shadow.camera.right = 3;
+sun.shadow.camera.top = 3; sun.shadow.camera.bottom = -3;
+sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 12;
+sun.shadow.bias = -0.0005;
+sun.shadow.normalBias = 0.02;
+scene.add(sun, sun.target);
+
+// luminária de teto
+const ceiling = new THREE.PointLight(0xfff4e5, 2.0, 0, 2);
+ceiling.position.set(0.75, H - 0.15, 1.6);
+scene.add(ceiling);
+sphere(v(0.75, H - 0.04, 1.6), 0.07, new THREE.MeshBasicMaterial({ color: 0xfff4e5 })).castShadow = false;
+
+// ---------------------------------------------------------------------------
+// Vistas da câmera
+// ---------------------------------------------------------------------------
+const views = {
+  // vista de cima com teleobjetiva para reduzir a distorção de perspectiva (quase uma planta)
+  top:   { pos: v(W / 2, 13, L / 2 + 0.001), target: v(W / 2, 0, L / 2), fov: 18 },
+  front: { pos: v(W / 2, 1.45, L + 4.2), target: v(W / 2, 1.25, L / 2 - 0.2), fov: 45 },
+  free:  { pos: v(W + 2.4, 3.1, L + 2.7), target: center.clone(), fov: 45 },
+};
+let currentView = 'free';
+let tween = null;
+
+function fitDistance(baseDist) {
+  // afasta a câmera em telas estreitas (retrato)
+  const aspect = camera.aspect;
+  return aspect < 1 ? baseDist * Math.min(1.9, 1 / aspect) : baseDist;
+}
+
+function goTo(name, instant = false) {
+  currentView = name;
+  const vw = views[name];
+  const dir = vw.pos.clone().sub(vw.target);
+  const pos = vw.target.clone().add(dir.setLength(fitDistance(dir.length())));
+  document.querySelectorAll('#views button').forEach(b => b.classList.toggle('active', b.dataset.view === name));
+  if (instant) {
+    camera.position.copy(pos);
+    camera.fov = vw.fov;
+    camera.updateProjectionMatrix();
+    controls.target.copy(vw.target);
+    controls.update();
+    return;
+  }
+  tween = { t: 0, fromPos: camera.position.clone(), fromTarget: controls.target.clone(), toPos: pos, toTarget: vw.target.clone(), fromFov: camera.fov, toFov: vw.fov };
+}
+goTo('free', true);
+
+document.querySelectorAll('#views button').forEach(b => b.addEventListener('click', () => goTo(b.dataset.view)));
+controls.addEventListener('start', () => {
+  tween = null;
+  if (currentView !== 'free') {
+    currentView = 'free';
+    document.querySelectorAll('#views button').forEach(b => b.classList.toggle('active', b.dataset.view === 'free'));
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Botões de alternância
+// ---------------------------------------------------------------------------
+let autoCut = true;
+const btnWalls = document.getElementById('btnWalls');
+btnWalls.addEventListener('click', () => {
+  autoCut = !autoCut;
+  btnWalls.classList.toggle('active', autoCut);
+  btnWalls.textContent = autoCut ? 'Corte automático' : 'Paredes translúcidas';
+});
+
+const btnLed = document.getElementById('btnLed');
+function applyLed() {
+  const c = ledColors[ledIndex];
+  const on = c.c !== null;
+  ledMat.color.set(on ? c.c : 0x333333);
+  for (const l of ledLights) {
+    l.light.visible = on;
+    if (on) l.light.color.set(c.c);
+  }
+  btnLed.textContent = `LED: ${c.name}`;
+  btnLed.classList.toggle('active', on);
+}
+btnLed.addEventListener('click', () => { ledIndex = (ledIndex + 1) % ledColors.length; applyLed(); });
+applyLed();
+
+const btnDoor = document.getElementById('btnDoor');
+btnDoor.addEventListener('click', () => {
+  doorOpen = !doorOpen;
+  btnDoor.textContent = doorOpen ? 'Fechar porta' : 'Abrir porta';
+});
+
+const info = document.getElementById('info');
+const btnInfo = document.getElementById('btnInfo');
+btnInfo.classList.add('active');
+btnInfo.addEventListener('click', () => {
+  info.classList.toggle('hidden');
+  btnInfo.classList.toggle('active', !info.classList.contains('hidden'));
+});
+
+// ---------------------------------------------------------------------------
+// Loop
+// ---------------------------------------------------------------------------
+const clock = new THREE.Clock();
+const tmp = new THREE.Vector3();
+const ease = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  if (tween) {
+    tween.t = Math.min(1, tween.t + dt / 0.9);
+    const k = ease(tween.t);
+    camera.position.lerpVectors(tween.fromPos, tween.toPos, k);
+    controls.target.lerpVectors(tween.fromTarget, tween.toTarget, k);
+    camera.fov = THREE.MathUtils.lerp(tween.fromFov, tween.toFov, k);
+    camera.updateProjectionMatrix();
+    if (tween.t >= 1) tween = null;
+  }
+  controls.update();
+
+  // corte das paredes: as que ficam entre a câmera e o interior quase somem
+  for (const w of walls) {
+    const outside = tmp.subVectors(camera.position, w.point).dot(w.normal) > 0;
+    const target = autoCut ? (outside ? 0.06 : 1) : 0.45;
+    w.current += (target - w.current) * Math.min(1, dt * 8);
+    w.mats[0].opacity = 0.6 * w.current;
+    for (let i = 1; i < w.mats.length; i++) w.mats[i].opacity = w.current;
+    w.group.visible = w.current > 0.02;
+  }
+
+  // porta
+  const goal = doorOpen ? DOOR_OPEN : 0;
+  doorAngle += (goal - doorAngle) * Math.min(1, dt * 5);
+  doorPivot.rotation.y = -doorAngle;
+
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
